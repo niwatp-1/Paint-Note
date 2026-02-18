@@ -147,6 +147,7 @@
             });
 
             const galleryInputRef = useRef(null);
+            const nativeCameraInputRef = useRef(null);
 
             useEffect(() => {
                 localStorage.setItem('paintShopData', JSON.stringify(customers));
@@ -208,11 +209,10 @@
                 await new Promise(r => setTimeout(r, 100));
 
                 try {
+                    // Removed ideal width/height to maximize compatibility and avoid OverconstrainedError
                     const constraints = {
                         video: { 
-                            facingMode: facingMode,
-                            width: { ideal: 1280 },
-                            height: { ideal: 720 }
+                            facingMode: facingMode
                         },
                         audio: false 
                     };
@@ -236,6 +236,8 @@
                         setCameraError("กล้องกำลังถูกใช้งาน โปรดลองใหม่อีกครั้ง");
                     } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
                         setCameraError("กรุณาอนุญาตสิทธิ์การเข้าถึงกล้อง");
+                    } else if (err.name === 'OverconstrainedError') {
+                        setCameraError("กล้องไม่รองรับความละเอียดที่กำหนด");
                     } else {
                         setCameraError("ไม่สามารถเปิดกล้องได้: " + err.message);
                     }
@@ -289,6 +291,15 @@
 
             const triggerGallery = () => {
                 if (galleryInputRef.current) galleryInputRef.current.click();
+            };
+
+            const triggerNativeCamera = () => {
+                if (nativeCameraInputRef.current) {
+                     nativeCameraInputRef.current.click();
+                     // Close the in-app camera overlay if it's open
+                     setIsCameraActive(false);
+                     setCameraError(null);
+                }
             };
 
             const handleAddNew = () => {
@@ -488,17 +499,35 @@
                                     <div className="absolute inset-0 z-50 bg-black flex flex-col">
                                         <div className="relative flex-1 overflow-hidden bg-black flex items-center justify-center">
                                             {cameraError ? (
-                                                <div className="text-white text-center p-6 space-y-4">
+                                                <div className="text-white text-center p-6 space-y-4 flex flex-col items-center w-full">
                                                     <div className="bg-red-500/20 p-4 rounded-full inline-block">
                                                         <Icons.X className="w-10 h-10 text-red-400" />
                                                     </div>
                                                     <p className="text-lg font-bold">{cameraError}</p>
-                                                    <button 
-                                                        onClick={() => { setCameraError(null); initCamera(); }}
-                                                        className="px-6 py-2 bg-white text-black rounded-full font-bold text-sm hover:bg-gray-200"
-                                                    >
-                                                        ลองใหม่
-                                                    </button>
+                                                    
+                                                    <div className="flex flex-col gap-3 w-full max-w-xs mt-4">
+                                                        <button 
+                                                            onClick={() => { setCameraError(null); initCamera(); }}
+                                                            className="px-6 py-3 bg-white text-black rounded-xl font-bold text-sm hover:bg-gray-200 shadow-lg"
+                                                        >
+                                                            ลองใหม่
+                                                        </button>
+                                                        
+                                                        {/* Native Camera Fallback */}
+                                                        <button 
+                                                            onClick={triggerNativeCamera}
+                                                            className="px-6 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-500 shadow-lg flex items-center justify-center gap-2"
+                                                        >
+                                                            <Icons.Camera className="w-4 h-4" /> ใช้กล้องระบบ (Native)
+                                                        </button>
+
+                                                        <button 
+                                                            onClick={() => { closeCamera(); triggerGallery(); }}
+                                                            className="px-6 py-3 bg-white/10 text-white border border-white/20 rounded-xl font-bold text-sm hover:bg-white/20 backdrop-blur-sm"
+                                                        >
+                                                            เลือกจากอัลบั้ม
+                                                        </button>
+                                                    </div>
                                                 </div>
                                             ) : (
                                                 <>
@@ -612,6 +641,7 @@
                                         
                                         {/* Hidden Gallery Input */}
                                         <input type="file" ref={galleryInputRef} accept="image/*" onChange={handleImageUpload} className="hidden" />
+                                        <input type="file" ref={nativeCameraInputRef} accept="image/*" capture="environment" onChange={handleImageUpload} className="hidden" />
                                     </div>
 
                                     {/* Form Fields - Larger Text & Padding */}
