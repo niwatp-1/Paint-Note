@@ -12,8 +12,32 @@
             theme: {
                 extend: {
                     fontFamily: {
-                        sans: ['Inter', 'IBM Plex Sans Thai', 'sans-serif'], // Set Modern Font Stack
+                        sans: ['Inter', 'IBM Plex Sans Thai', 'sans-serif'], 
                     },
+                    keyframes: {
+                        fadeInUp: {
+                            '0%': { opacity: '0', transform: 'translateY(20px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        slideDown: {
+                            '0%': { opacity: '0', transform: 'translateY(-20px)' },
+                            '100%': { opacity: '1', transform: 'translateY(0)' },
+                        },
+                        popIn: {
+                            '0%': { opacity: '0', transform: 'scale(0.9)' },
+                            '100%': { opacity: '1', transform: 'scale(1)' },
+                        },
+                        float: {
+                            '0%, 100%': { transform: 'translateY(0)' },
+                            '50%': { transform: 'translateY(-6px)' },
+                        }
+                    },
+                    animation: {
+                        'fade-in-up': 'fadeInUp 0.6s ease-out forwards',
+                        'slide-down': 'slideDown 0.6s ease-out forwards',
+                        'pop-in': 'popIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+                        'float': 'float 3s ease-in-out infinite',
+                    }
                 },
             },
         }
@@ -131,15 +155,6 @@
             const [editingId, setEditingId] = useState(null); 
             const [selectedImage, setSelectedImage] = useState(null);
             
-            // --- Camera State Management (Refined) ---
-            const [isCameraActive, setIsCameraActive] = useState(false);
-            const [facingMode, setFacingMode] = useState('environment'); // environment = rear, user = front
-            const [cameraError, setCameraError] = useState(null);
-            
-            const videoRef = useRef(null);
-            const canvasRef = useRef(null);
-            const streamRef = useRef(null); 
-            
             const [formData, setFormData] = useState({
                 name: '',
                 phone: '',
@@ -182,114 +197,6 @@
                 e.target.value = ''; 
             };
 
-            // --- Robust Camera Functions ---
-            
-            // 1. Function to stop tracks safely
-            const stopMediaTracks = useCallback(() => {
-                if (streamRef.current) {
-                    const tracks = streamRef.current.getTracks();
-                    tracks.forEach(track => {
-                        track.stop();
-                        track.enabled = false;
-                    });
-                    streamRef.current = null;
-                }
-                if (videoRef.current) {
-                    videoRef.current.srcObject = null;
-                }
-            }, []);
-
-            // 2. Camera Initialization with Retry Logic
-            const initCamera = useCallback(async () => {
-                setCameraError(null);
-                
-                // Ensure previous stream is stopped completely
-                stopMediaTracks();
-
-                // Small delay to let browser release hardware
-                await new Promise(r => setTimeout(r, 100));
-
-                try {
-                    // Removed ideal width/height to maximize compatibility and avoid OverconstrainedError
-                    const constraints = {
-                        video: { 
-                            facingMode: facingMode
-                        },
-                        audio: false 
-                    };
-
-                    const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                    
-                    streamRef.current = stream;
-                    
-                    if (videoRef.current) {
-                        videoRef.current.srcObject = stream;
-                        videoRef.current.onloadedmetadata = () => {
-                            videoRef.current.play().catch(e => console.warn("Play interrupted:", e));
-                        };
-                    }
-                } catch (err) {
-                    console.error("Camera Init Error:", err);
-                    
-                    // Handle specific errors
-                    if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
-                        // Device in use: Try again after a longer delay or fail gracefully
-                        setCameraError("กล้องกำลังถูกใช้งาน โปรดลองใหม่อีกครั้ง");
-                    } else if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-                        setCameraError("กรุณาอนุญาตสิทธิ์การเข้าถึงกล้อง");
-                    } else if (err.name === 'OverconstrainedError') {
-                        setCameraError("กล้องไม่รองรับความละเอียดที่กำหนด");
-                    } else {
-                        setCameraError("ไม่สามารถเปิดกล้องได้: " + err.message);
-                    }
-                }
-            }, [facingMode, stopMediaTracks]);
-
-            // 3. Effect to handle lifecycle
-            useEffect(() => {
-                let mounted = true;
-
-                if (isCameraActive) {
-                    initCamera();
-                } else {
-                    stopMediaTracks();
-                }
-
-                return () => {
-                    mounted = false;
-                    stopMediaTracks();
-                };
-            }, [isCameraActive, initCamera, stopMediaTracks]);
-
-            const capturePhoto = () => {
-                const video = videoRef.current;
-                const canvas = canvasRef.current;
-                if (video && canvas && video.videoWidth > 0) {
-                    const context = canvas.getContext('2d');
-                    canvas.width = video.videoWidth;
-                    canvas.height = video.videoHeight;
-                    
-                    // Flip horizontally if using front camera
-                    if (facingMode === 'user') {
-                        context.translate(canvas.width, 0);
-                        context.scale(-1, 1);
-                    }
-                    
-                    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-                    
-                    const imageSrc = canvas.toDataURL('image/jpeg', 0.85);
-                    setSelectedImage(imageSrc);
-                    setIsCameraActive(false); 
-                }
-            };
-
-            const toggleCameraFacing = () => {
-                // Stop first
-                stopMediaTracks();
-                // Then change state (will trigger re-init via useEffect)
-                setFacingMode(prev => prev === 'environment' ? 'user' : 'environment');
-            };
-
             const triggerGallery = () => {
                 if (galleryInputRef.current) galleryInputRef.current.click();
             };
@@ -297,9 +204,6 @@
             const triggerNativeCamera = () => {
                 if (nativeCameraInputRef.current) {
                      nativeCameraInputRef.current.click();
-                     // Close the in-app camera overlay if it's open
-                     setIsCameraActive(false);
-                     setCameraError(null);
                 }
             };
 
@@ -351,23 +255,16 @@
                 }
                 
                 setIsModalOpen(false);
-                setIsCameraActive(false); 
-            };
-
-            // Close camera safely
-            const closeCamera = () => {
-                setIsCameraActive(false);
-                setCameraError(null);
             };
 
             return (
                 <div className="min-h-screen bg-gray-50 text-[#1e3a8a] pb-24 relative overflow-hidden font-sans">
                     
                     {/* Background Decor */}
-                    <div className="absolute top-0 left-0 w-full h-72 bg-gradient-to-b from-[#1e3a8a] via-[#2546a3] to-transparent z-0 shadow-xl opacity-90"></div>
+                    <div className="absolute top-0 left-0 w-full h-72 bg-gradient-to-b from-[#1e3a8a] via-[#2546a3] to-transparent z-0 shadow-xl opacity-90 transition-all duration-1000"></div>
 
-                    {/* Header */}
-                    <div className="relative z-10 px-6 pt-10 pb-4">
+                    {/* Header - Animated Slide Down */}
+                    <div className="relative z-10 px-6 pt-10 pb-4 animate-slide-down opacity-0" style={{ animationDelay: '50ms' }}>
                         <div className="flex justify-between items-center mb-8">
                             <div className="flex items-center gap-3">
                                 <div className="p-2.5 bg-white/10 backdrop-blur-md rounded-xl text-white border border-white/20 shadow-inner">
@@ -378,13 +275,13 @@
                                     <p className="text-blue-100 text-xs font-medium opacity-80">ระบบจัดการลูกค้า</p>
                                 </div>
                             </div>
-                            <div className="w-11 h-11 bg-gradient-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center text-white font-bold shadow-lg border-2 border-white/30">
+                            <div className="w-11 h-11 bg-gradient-to-br from-orange-400 to-orange-600 rounded-full flex items-center justify-center text-white font-bold shadow-lg border-2 border-white/30 cursor-pointer hover:scale-105 transition-transform">
                                 A
                             </div>
                         </div>
                         
-                        {/* Search Bar */}
-                        <div className="relative transform translate-y-2">
+                        {/* Search Bar - Animated Fade In Up */}
+                        <div className="relative transform translate-y-2 animate-fade-in-up opacity-0" style={{ animationDelay: '150ms' }}>
                             <input
                                 type="text"
                                 placeholder="ค้นหาชื่อ, เบอร์โทร..."
@@ -392,43 +289,44 @@
                                 value={searchTerm}
                                 onChange={(e) => setSearchTerm(e.target.value)}
                             />
-                            <Icons.Search className="absolute left-4 top-4 text-[#1e3a8a] w-5 h-5 opacity-40" />
+                            <Icons.Search className="absolute left-4 top-4 text-[#1e3a8a] w-5 h-5 opacity-40 transition-opacity focus-within:opacity-100" />
                         </div>
                     </div>
 
                     {/* List Container */}
                     <div className="relative z-10 px-5 mt-10 space-y-4">
-                        <div className="flex justify-between items-end px-1 mb-2">
+                        <div className="flex justify-between items-end px-1 mb-2 animate-fade-in-up opacity-0" style={{ animationDelay: '250ms' }}>
                             <span className="text-[#1e3a8a] font-bold text-lg">รายการล่าสุด</span>
                             <span className="text-[#1e3a8a] text-[10px] font-bold bg-blue-50 px-3 py-1 rounded-full border border-blue-100 uppercase tracking-tighter opacity-80">
                                 {filteredCustomers.length} รายการ
                             </span>
                         </div>
 
-                        {filteredCustomers.map((customer) => (
+                        {filteredCustomers.map((customer, index) => (
                             <div 
                                 key={customer.id} 
                                 onClick={() => handleEdit(customer)}
-                                className="group bg-white rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(30,58,138,0.08)] border border-gray-100 flex gap-4 items-center relative overflow-hidden transition-all duration-300 hover:shadow-xl hover:-translate-y-1 cursor-pointer active:scale-[0.98]"
+                                className="group bg-white rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(30,58,138,0.08)] border border-gray-100 flex gap-4 items-center relative overflow-hidden transition-all duration-300 hover:shadow-xl hover:-translate-y-1 cursor-pointer active:scale-[0.98] animate-fade-in-up opacity-0"
+                                style={{ animationDelay: `${(index * 100) + 300}ms` }}
                             >
                                 
                                 {/* Accent Line */}
-                                <div className="absolute left-0 top-4 bottom-4 w-1.5 bg-gradient-to-b from-orange-400 to-orange-500 rounded-r-full shadow-sm"></div>
+                                <div className="absolute left-0 top-4 bottom-4 w-1.5 bg-gradient-to-b from-orange-400 to-orange-500 rounded-r-full shadow-sm group-hover:scale-y-110 transition-transform duration-300"></div>
 
                                 {/* Thumbnail */}
-                                <div className="w-18 h-18 bg-blue-50/50 rounded-xl flex-shrink-0 overflow-hidden border border-blue-100/50 relative shadow-inner w-[72px] h-[72px]">
+                                <div className="w-18 h-18 bg-blue-50/50 rounded-xl flex-shrink-0 overflow-hidden border border-blue-100/50 relative shadow-inner w-[72px] h-[72px] group-hover:shadow-md transition-shadow">
                                     {customer.image ? (
-                                        <img src={customer.image} alt="Color" className="w-full h-full object-cover" />
+                                        <img src={customer.image} alt="Color" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" />
                                     ) : (
                                         <div className="w-full h-full flex flex-col items-center justify-center text-blue-200">
-                                            <Icons.ImageIcon className="w-6 h-6 opacity-40" />
+                                            <Icons.ImageIcon className="w-6 h-6 opacity-40 group-hover:opacity-60 transition-opacity" />
                                         </div>
                                     )}
                                 </div>
 
                                 {/* Info */}
                                 <div className="flex-1 min-w-0 pl-1">
-                                    <h3 className="font-bold text-[#1e3a8a] text-[15px] truncate leading-tight mb-1 group-hover:text-orange-600 transition-colors">
+                                    <h3 className="font-bold text-[#1e3a8a] text-[15px] truncate leading-tight mb-1 group-hover:text-orange-600 transition-colors duration-300">
                                         {customer.name}
                                     </h3>
                                     
@@ -445,7 +343,7 @@
                                             {customer.date}
                                             <button 
                                                 onClick={(e) => handleDelete(customer.id, e)}
-                                                className="p-1.5 rounded-full text-red-300 hover:text-red-500 hover:bg-red-50 transition-colors z-20"
+                                                className="p-1.5 rounded-full text-red-300 hover:text-red-500 hover:bg-red-50 transition-colors z-20 hover:scale-110 active:scale-95"
                                             >
                                                 <Icons.Trash2 className="w-4 h-4" />
                                             </button>
@@ -453,13 +351,13 @@
                                     </div>
                                 </div>
                                 
-                                <Icons.ChevronRight className="text-blue-100 w-5 h-5 group-hover:text-orange-500 group-hover:translate-x-1 transition-all" />
+                                <Icons.ChevronRight className="text-blue-100 w-5 h-5 group-hover:text-orange-500 group-hover:translate-x-1 transition-all duration-300" />
                             </div>
                         ))}
 
                         {/* Empty State */}
                         {filteredCustomers.length === 0 && (
-                            <div className="text-center py-20">
+                            <div className="text-center py-20 animate-pop-in opacity-0" style={{ animationDelay: '300ms' }}>
                                 <div className="bg-white p-5 rounded-3xl inline-block shadow-sm mb-4 border border-blue-50">
                                     <Icons.Search className="w-8 h-8 text-blue-100" />
                                 </div>
@@ -468,116 +366,33 @@
                         )}
                     </div>
 
-                    {/* FAB */}
-                    <div className="fixed bottom-6 left-0 w-full px-6 z-20 pointer-events-none flex justify-center">
-                        <button 
-                            onClick={handleAddNew}
-                            className="pointer-events-auto flex items-center gap-3 bg-[#1e3a8a] text-white px-8 py-4 rounded-full shadow-2xl shadow-blue-900/40 hover:bg-[#152c6e] active:scale-95 transition-all transform hover:-translate-y-1 ring-4 ring-white/10"
-                        >
-                            <div className="bg-orange-500 p-1 rounded-full shadow-inner">
-                                <Icons.Plus className="w-4 h-4 text-white" />
-                            </div>
-                            <span className="font-bold text-sm tracking-widest uppercase">เพิ่มลูกค้าใหม่</span>
-                        </button>
+                    {/* Animated FAB with floating effect wrapper */}
+                    <div className="fixed bottom-6 left-0 w-full px-6 z-20 pointer-events-none flex justify-center animate-pop-in opacity-0" style={{ animationDelay: '600ms' }}>
+                        <div className="animate-float">
+                            <button 
+                                onClick={handleAddNew}
+                                className="pointer-events-auto flex items-center gap-3 bg-[#1e3a8a] text-white px-8 py-4 rounded-full shadow-2xl shadow-blue-900/40 hover:bg-[#152c6e] active:scale-95 transition-all transform hover:-translate-y-1 ring-4 ring-white/10 group"
+                            >
+                                <div className="bg-orange-500 p-1 rounded-full shadow-inner group-hover:rotate-90 transition-transform duration-300">
+                                    <Icons.Plus className="w-4 h-4 text-white" />
+                                </div>
+                                <span className="font-bold text-sm tracking-widest uppercase">เพิ่มลูกค้าใหม่</span>
+                            </button>
+                        </div>
                     </div>
 
                     {/* Modal */}
                     {isModalOpen && (
                         <div 
-                            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#1e3a8a]/60 backdrop-blur-sm transition-all animate-in fade-in duration-200"
+                            className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#1e3a8a]/60 backdrop-blur-sm transition-all duration-300"
                             onClick={(e) => {
-                                // Close modal if clicking on backdrop (empty space)
                                 if (e.target === e.currentTarget) {
                                     setIsModalOpen(false);
-                                    closeCamera(); // Close camera on backdrop click
                                 }
                             }}
                         >
-                            <div className="bg-white w-full sm:max-w-md h-[94vh] sm:h-auto sm:max-h-[90vh] rounded-t-[40px] sm:rounded-3xl flex flex-col overflow-hidden animate-in slide-in-from-bottom duration-300 shadow-2xl relative">
+                            <div className="bg-white w-full sm:max-w-md h-[94vh] sm:h-auto sm:max-h-[90vh] rounded-t-[40px] sm:rounded-3xl flex flex-col overflow-hidden shadow-2xl relative animate-pop-in opacity-0" style={{ animationDelay: '50ms' }}>
                                 
-                                {/* Camera Overlay */}
-                                {isCameraActive && (
-                                    <div className="absolute inset-0 z-50 bg-black flex flex-col">
-                                        <div className="relative flex-1 overflow-hidden bg-black flex items-center justify-center">
-                                            {cameraError ? (
-                                                <div className="text-white text-center p-6 space-y-4 flex flex-col items-center w-full">
-                                                    <div className="bg-red-500/20 p-4 rounded-full inline-block">
-                                                        <Icons.X className="w-10 h-10 text-red-400" />
-                                                    </div>
-                                                    <p className="text-lg font-bold">{cameraError}</p>
-                                                    
-                                                    <div className="flex flex-col gap-3 w-full max-w-xs mt-4">
-                                                        <button 
-                                                            onClick={() => { setCameraError(null); initCamera(); }}
-                                                            className="px-6 py-3 bg-white text-black rounded-xl font-bold text-sm hover:bg-gray-200 shadow-lg"
-                                                        >
-                                                            ลองใหม่
-                                                        </button>
-                                                        
-                                                        {/* Native Camera Fallback */}
-                                                        <button 
-                                                            onClick={triggerNativeCamera}
-                                                            className="px-6 py-3 bg-blue-600 text-white rounded-xl font-bold text-sm hover:bg-blue-500 shadow-lg flex items-center justify-center gap-2"
-                                                        >
-                                                            <Icons.Camera className="w-4 h-4" /> ใช้กล้องระบบ (Native)
-                                                        </button>
-
-                                                        <button 
-                                                            onClick={() => { closeCamera(); triggerGallery(); }}
-                                                            className="px-6 py-3 bg-white/10 text-white border border-white/20 rounded-xl font-bold text-sm hover:bg-white/20 backdrop-blur-sm"
-                                                        >
-                                                            เลือกจากอัลบั้ม
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                <>
-                                                    <video 
-                                                        ref={videoRef} 
-                                                        autoPlay 
-                                                        playsInline 
-                                                        muted 
-                                                        className="absolute inset-0 w-full h-full object-cover"
-                                                    ></video>
-                                                    <canvas ref={canvasRef} className="hidden"></canvas>
-                                                    
-                                                    {/* Camera UI Grid */}
-                                                    <div className="absolute inset-0 pointer-events-none border border-white/20 m-4 rounded-xl">
-                                                        <div className="w-full h-1/3 border-b border-white/10"></div>
-                                                        <div className="w-full h-1/3 border-b border-white/10"></div>
-                                                    </div>
-                                                </>
-                                            )}
-                                        </div>
-
-                                        {/* Camera Controls */}
-                                        <div className="bg-black/80 backdrop-blur-lg p-6 pb-8 flex items-center justify-between">
-                                            <button 
-                                                onClick={closeCamera} 
-                                                className="p-3 rounded-full bg-white/10 text-white hover:bg-white/20 transition-all"
-                                            >
-                                                <Icons.X className="w-6 h-6" />
-                                            </button>
-                                            
-                                            {!cameraError && (
-                                                <button 
-                                                    onClick={capturePhoto}
-                                                    className="w-16 h-16 rounded-full border-4 border-white flex items-center justify-center bg-transparent camera-btn-pulse active:scale-90 transition-transform"
-                                                >
-                                                    <div className="w-12 h-12 bg-white rounded-full"></div>
-                                                </button>
-                                            )}
-                                            
-                                            <button 
-                                                onClick={toggleCameraFacing} 
-                                                className="p-3 rounded-full bg-white/10 text-white hover:bg-white/20 transition-all"
-                                            >
-                                                <Icons.SwitchCamera className="w-6 h-6" />
-                                            </button>
-                                        </div>
-                                    </div>
-                                )}
-
                                 {/* Modal Header */}
                                 <div className="bg-white text-[#1e3a8a] p-8 pb-4 rounded-b-3xl z-10 relative shadow-sm">
                                     <div className="flex justify-between items-center">
@@ -585,24 +400,24 @@
                                             <h2 className="text-2xl font-black tracking-tight">{editingId ? 'แก้ไขข้อมูล' : 'เพิ่มข้อมูลใหม่'}</h2>
                                             <p className="text-blue-300 text-xs font-bold uppercase mt-1 tracking-widest">Customer Details & Formula</p>
                                         </div>
-                                        <button onClick={() => {setIsModalOpen(false); closeCamera();}} className="bg-blue-50 p-2.5 rounded-full hover:bg-red-50 hover:text-red-500 text-blue-400 transition-all">
+                                        <button onClick={() => setIsModalOpen(false)} className="bg-blue-50 p-2.5 rounded-full hover:bg-red-50 hover:text-red-500 hover:scale-110 text-blue-400 transition-all">
                                             <Icons.X className="w-6 h-6" />
                                         </button>
                                     </div>
                                 </div>
 
-                                {/* Modal Body */}
+                                {/* Modal Body - Staggered fade in up */}
                                 <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-8 space-y-7 bg-white no-scrollbar">
                                     
                                     {/* Photo Upload Section */}
-                                    <div className="bg-blue-50/30 p-5 rounded-3xl border-2 border-blue-50 border-dashed hover:border-orange-200 transition-colors">
+                                    <div className="bg-blue-50/30 p-5 rounded-3xl border-2 border-blue-50 border-dashed hover:border-orange-200 transition-colors animate-fade-in-up opacity-0" style={{ animationDelay: '150ms' }}>
                                         <div className="flex justify-between items-center mb-4 px-1">
                                             <label className="text-xs font-black text-[#1e3a8a] uppercase tracking-widest">สูตรสี / ข้อมูลภาพ</label>
-                                            {selectedImage && <span className="text-[10px] text-orange-600 font-black bg-orange-50 px-2 py-1 rounded-lg">UPLOADED</span>}
+                                            {selectedImage && <span className="text-[10px] text-orange-600 font-black bg-orange-50 px-2 py-1 rounded-lg animate-pop-in">UPLOADED</span>}
                                         </div>
                                         
                                         {selectedImage ? (
-                                            <div className="relative rounded-2xl overflow-hidden shadow-xl border-4 border-white group">
+                                            <div className="relative rounded-2xl overflow-hidden shadow-xl border-4 border-white group animate-pop-in">
                                                 <img src={selectedImage} alt="Preview" className="w-full h-56 object-cover" />
                                                 <div className="absolute inset-0 bg-[#1e3a8a]/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-[2px]">
                                                     <button 
@@ -618,10 +433,10 @@
                                             <div className="grid grid-cols-2 gap-4">
                                                 <button 
                                                     type="button"
-                                                    onClick={() => setIsCameraActive(true)}
-                                                    className="group flex flex-col items-center justify-center gap-3 py-8 bg-white border border-blue-100 rounded-3xl text-[#1e3a8a] shadow-sm hover:shadow-md hover:border-orange-200 transition-all active:scale-95 active:bg-blue-50"
+                                                    onClick={triggerNativeCamera}
+                                                    className="group flex flex-col items-center justify-center gap-3 py-8 bg-white border border-blue-100 rounded-3xl text-[#1e3a8a] shadow-sm hover:shadow-md hover:border-orange-200 hover:-translate-y-1 transition-all active:scale-95 active:bg-blue-50"
                                                 >
-                                                    <div className="p-3 bg-blue-50 rounded-2xl group-hover:bg-orange-50 transition-colors">
+                                                    <div className="p-3 bg-blue-50 rounded-2xl group-hover:bg-orange-50 group-hover:scale-110 transition-all">
                                                         <Icons.Camera className="w-8 h-8 text-[#1e3a8a] group-hover:text-orange-500" />
                                                     </div>
                                                     <span className="text-xs font-black text-[#1e3a8a] uppercase tracking-widest">ถ่ายรูป</span>
@@ -630,9 +445,9 @@
                                                 <button 
                                                     type="button"
                                                     onClick={triggerGallery}
-                                                    className="group flex flex-col items-center justify-center gap-3 py-8 bg-white border border-blue-100 rounded-3xl text-[#1e3a8a] shadow-sm hover:shadow-md hover:border-orange-200 transition-all active:scale-95 active:bg-blue-50"
+                                                    className="group flex flex-col items-center justify-center gap-3 py-8 bg-white border border-blue-100 rounded-3xl text-[#1e3a8a] shadow-sm hover:shadow-md hover:border-orange-200 hover:-translate-y-1 transition-all active:scale-95 active:bg-blue-50"
                                                 >
-                                                    <div className="p-3 bg-blue-50 rounded-2xl group-hover:bg-orange-50 transition-colors">
+                                                    <div className="p-3 bg-blue-50 rounded-2xl group-hover:bg-orange-50 group-hover:scale-110 transition-all">
                                                         <Icons.ImageIcon className="w-8 h-8 text-[#1e3a8a] group-hover:text-orange-500" />
                                                     </div>
                                                     <span className="text-xs font-black text-[#1e3a8a] uppercase tracking-widest">อัลบั้ม</span>
@@ -645,13 +460,13 @@
                                         <input type="file" ref={nativeCameraInputRef} accept="image/*" capture="environment" onChange={handleImageUpload} className="hidden" />
                                     </div>
 
-                                    {/* Form Fields - Larger Text & Padding */}
+                                    {/* Form Fields */}
                                     <div className="space-y-6">
-                                        <div className="group relative">
-                                            <div className="flex items-center border-2 border-blue-50 bg-blue-50/20 rounded-2xl px-5 py-4 focus-within:ring-2 focus-within:ring-[#1e3a8a] focus-within:bg-white focus-within:border-transparent transition-all shadow-sm">
-                                                <Icons.User className="text-[#1e3a8a] w-6 h-6 mr-4 opacity-70 group-focus-within:opacity-100 transition-opacity" />
+                                        <div className="group relative animate-fade-in-up opacity-0" style={{ animationDelay: '250ms' }}>
+                                            <div className="flex items-center border-2 border-blue-50 bg-blue-50/20 rounded-2xl px-5 py-4 focus-within:ring-2 focus-within:ring-[#1e3a8a] focus-within:bg-white focus-within:border-transparent transition-all shadow-sm hover:shadow-md">
+                                                <Icons.User className="text-[#1e3a8a] w-6 h-6 mr-4 opacity-70 group-focus-within:opacity-100 group-focus-within:scale-110 transition-all" />
                                                 <div className="flex-1">
-                                                    <label className="block text-xs font-black uppercase mb-1 tracking-widest text-[#1e3a8a] opacity-60 group-focus-within:opacity-100">
+                                                    <label className="block text-xs font-black uppercase mb-1 tracking-widest text-[#1e3a8a] opacity-60 group-focus-within:opacity-100 transition-opacity">
                                                         ชื่อลูกค้า
                                                     </label>
                                                     <input
@@ -666,11 +481,11 @@
                                             </div>
                                         </div>
 
-                                        <div className="group relative">
-                                            <div className="flex items-center border-2 border-blue-50 bg-blue-50/20 rounded-2xl px-5 py-4 focus-within:ring-2 focus-within:ring-[#1e3a8a] focus-within:bg-white focus-within:border-transparent transition-all shadow-sm">
-                                                <Icons.Phone className="text-orange-500 w-6 h-6 mr-4 opacity-70 group-focus-within:opacity-100 transition-opacity" />
+                                        <div className="group relative animate-fade-in-up opacity-0" style={{ animationDelay: '300ms' }}>
+                                            <div className="flex items-center border-2 border-blue-50 bg-blue-50/20 rounded-2xl px-5 py-4 focus-within:ring-2 focus-within:ring-[#1e3a8a] focus-within:bg-white focus-within:border-transparent transition-all shadow-sm hover:shadow-md">
+                                                <Icons.Phone className="text-orange-500 w-6 h-6 mr-4 opacity-70 group-focus-within:opacity-100 group-focus-within:scale-110 transition-all" />
                                                 <div className="flex-1">
-                                                    <label className="block text-xs font-black uppercase mb-1 tracking-widest text-orange-500 opacity-60 group-focus-within:opacity-100">
+                                                    <label className="block text-xs font-black uppercase mb-1 tracking-widest text-orange-500 opacity-60 group-focus-within:opacity-100 transition-opacity">
                                                         เบอร์โทร
                                                     </label>
                                                     <input
@@ -685,11 +500,11 @@
                                             </div>
                                         </div>
 
-                                        <div className="group relative">
-                                            <div className="flex items-center border-2 border-blue-50 bg-blue-50/20 rounded-2xl px-5 py-4 focus-within:ring-2 focus-within:ring-[#1e3a8a] focus-within:bg-white focus-within:border-transparent transition-all shadow-sm">
-                                                <Icons.Brush className="text-[#1e3a8a] w-6 h-6 mr-4 opacity-70 group-focus-within:opacity-100 transition-opacity" />
+                                        <div className="group relative animate-fade-in-up opacity-0" style={{ animationDelay: '350ms' }}>
+                                            <div className="flex items-center border-2 border-blue-50 bg-blue-50/20 rounded-2xl px-5 py-4 focus-within:ring-2 focus-within:ring-[#1e3a8a] focus-within:bg-white focus-within:border-transparent transition-all shadow-sm hover:shadow-md">
+                                                <Icons.Brush className="text-[#1e3a8a] w-6 h-6 mr-4 opacity-70 group-focus-within:opacity-100 group-focus-within:scale-110 transition-all" />
                                                 <div className="flex-1">
-                                                    <label className="block text-xs font-black uppercase mb-1 tracking-widest text-[#1e3a8a] opacity-60 group-focus-within:opacity-100">
+                                                    <label className="block text-xs font-black uppercase mb-1 tracking-widest text-[#1e3a8a] opacity-60 group-focus-within:opacity-100 transition-opacity">
                                                         ช่างผู้รับเหมา
                                                     </label>
                                                     <input
@@ -703,9 +518,9 @@
                                             </div>
                                         </div>
 
-                                        <div className="group relative">
-                                            <div className="border-2 border-blue-50 bg-blue-50/20 rounded-2xl px-5 py-4 focus-within:ring-2 focus-within:ring-[#1e3a8a] focus-within:bg-white focus-within:border-transparent transition-all shadow-sm">
-                                                <label className="block text-xs font-black text-[#1e3a8a] uppercase mb-2 tracking-widest opacity-60 group-focus-within:opacity-100">
+                                        <div className="group relative animate-fade-in-up opacity-0" style={{ animationDelay: '400ms' }}>
+                                            <div className="border-2 border-blue-50 bg-blue-50/20 rounded-2xl px-5 py-4 focus-within:ring-2 focus-within:ring-[#1e3a8a] focus-within:bg-white focus-within:border-transparent transition-all shadow-sm hover:shadow-md">
+                                                <label className="block text-xs font-black text-[#1e3a8a] uppercase mb-2 tracking-widest opacity-60 group-focus-within:opacity-100 transition-opacity">
                                                     รายละเอียดเพิ่มเติม / สูตรสี
                                                 </label>
                                                 <textarea
@@ -721,7 +536,7 @@
                                 </form>
 
                                 {/* Modal Footer with 3D Button */}
-                                <div className="p-6 bg-white border-t border-blue-50">
+                                <div className="p-6 bg-white border-t border-blue-50 animate-fade-in-up opacity-0" style={{ animationDelay: '450ms' }}>
                                     <button 
                                         onClick={handleSubmit}
                                         className="w-full bg-gradient-to-r from-[#1e3a8a] to-[#2563eb] border-b-[6px] border-[#172554] active:border-b-0 active:translate-y-[6px] text-white font-black py-4 rounded-2xl shadow-xl hover:shadow-2xl transition-all flex items-center justify-center gap-3 text-lg tracking-[0.2em] uppercase relative overflow-hidden group"
@@ -729,7 +544,7 @@
                                         {/* Shine Effect */}
                                         <div className="absolute top-0 -left-[100%] w-full h-full bg-gradient-to-r from-transparent via-white/20 to-transparent transform -skew-x-12 group-hover:animate-shine transition-all duration-1000"></div>
                                         
-                                        <Icons.Save className="w-6 h-6 relative z-10" /> 
+                                        <Icons.Save className="w-6 h-6 relative z-10 group-hover:scale-110 transition-transform" /> 
                                         <span className="relative z-10">{editingId ? 'บันทึกการแก้ไข' : 'บันทึกข้อมูลลูกค้า'}</span>
                                     </button>
                                 </div>
