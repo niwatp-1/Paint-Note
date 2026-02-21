@@ -522,6 +522,41 @@
                 }
             });
 
+            // ⚠️ กำหนด Web App URL ของ Google Apps Script ที่นี่ ⚠️
+            const WEB_APP_URL = "YOUR_WEB_APP_URL_HERE"; 
+
+            const [isLoadingData, setIsLoadingData] = useState(false);
+            const [isSaving, setIsSaving] = useState(false);
+
+            useEffect(() => {
+                const fetchData = async () => {
+                    if (WEB_APP_URL && WEB_APP_URL !== "YOUR_WEB_APP_URL_HERE") {
+                        setIsLoadingData(true);
+                        try {
+                            const response = await fetch(WEB_APP_URL, {
+                                method: 'POST',
+                                body: JSON.stringify({ action: 'read', username: currentUser.username }),
+                                headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                            });
+                            const result = await response.json();
+                            if (result.status === 'success') {
+                                setCustomers(result.data);
+                            }
+                        } catch (err) {
+                            console.error("Fetch error:", err);
+                        } finally {
+                            setIsLoadingData(false);
+                        }
+                    }
+                };
+                fetchData();
+            }, [currentUser.username]);
+
+            useEffect(() => {
+                // อัปเดตข้อมูลใน LocalStorage ด้วยเพื่อความเร็วในการโหลดครั้งถัดไป
+                localStorage.setItem(`paintShopData_${currentUser.username}`, JSON.stringify(customers));
+            }, [customers, currentUser.username]);
+
             const currentPackage = PACKAGES[currentUser.plan] || PACKAGES.FREE;
             const usageCount = customers.length;
             const canAddMore = usageCount < currentPackage.limit;
@@ -545,10 +580,6 @@
             const streamRef = useRef(null); 
             
             const [formData, setFormData] = useState({ name: '', phone: '', technician: '', note: '' });
-            
-            // --- สำหรับเชื่อมต่อ Google Apps Script ---
-            const [isSaving, setIsSaving] = useState(false);
-            const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw7T2ZDCekFxivOrU3I86B5ot0SVgNcDxYXPyEZDyhPLliSOPZjSBF0oXLD03uJsnUf/exec"; // ⚠️ นำ Web App URL ของคุณมาใส่ตรงนี้ ⚠️
 
             const galleryInputRef = useRef(null);
             const nativeCameraInputRef = useRef(null);
@@ -556,10 +587,6 @@
             useEffect(() => {
                 if (/Line/i.test(navigator.userAgent)) setIsLineBrowser(true);
             }, []);
-
-            useEffect(() => {
-                localStorage.setItem(`paintShopData_${currentUser.username}`, JSON.stringify(customers));
-            }, [customers, currentUser.username]);
 
             const convertToBase64 = (file) => {
                 return new Promise((resolve, reject) => {
@@ -672,11 +699,27 @@
                 setIsModalOpen(true);
             };
 
-            const handleDelete = (id, e) => {
+            const handleDelete = async (id, e) => {
                 e.stopPropagation(); 
                 if(window.confirm('ต้องการลบข้อมูลนี้ใช่หรือไม่?')) {
+                    const prevCustomers = [...customers];
                     setCustomers(customers.filter(c => c.id !== id));
                     if (editingId === id) setIsModalOpen(false); 
+
+                    if (WEB_APP_URL && WEB_APP_URL !== "YOUR_WEB_APP_URL_HERE") {
+                        try {
+                            const response = await fetch(WEB_APP_URL, {
+                                method: 'POST',
+                                body: JSON.stringify({ action: 'delete', id: id, username: currentUser.username }),
+                                headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                            });
+                            const result = await response.json();
+                            if (result.status !== 'success') throw new Error(result.message);
+                        } catch(err) {
+                            alert("ลบข้อมูลบนเซิร์ฟเวอร์ไม่สำเร็จ: " + err.message);
+                            setCustomers(prevCustomers); // นำข้อมูลกลับมาถ้าลบไม่สำเร็จ
+                        }
+                    }
                 }
             };
 
@@ -686,16 +729,23 @@
                 if (!editingId && !canAddMore) return; 
 
                 setIsSaving(true);
+                const dateStr = new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' });
 
                 try {
                     const payload = {
+                        action: 'save',
                         username: currentUser.username,
+                        editingId: editingId,
+                        date: dateStr,
                         ...formData,
                         image: selectedImage
                     };
 
+                    let finalImage = selectedImage;
+                    let finalId = editingId || Date.now();
+
                     // ส่ง API ไปยัง Google Apps Script (ถ้ามีการตั้งค่า URL)
-                    if (WEB_APP_URL && WEB_APP_URL !== "YOUR_WEB_APP_URL_HERE") {
+                    if (WEB_APP_URL && WEB_APP_URL !== "https://script.google.com/macros/s/AKfycbw_Jxv4EM1JXrwXule-aVcCSv35jgFgxqPI8woZv-BoVXcmU8jnLUf8Bkd1DZbBFAgv/exec") {
                         const response = await fetch(WEB_APP_URL, {
                             method: 'POST',
                             body: JSON.stringify(payload),
@@ -706,12 +756,15 @@
                         if (result.status !== 'success') {
                             throw new Error(result.message);
                         }
+                        
+                        finalImage = result.imageUrl || selectedImage;
+                        finalId = result.id || finalId;
                     }
 
                     if (editingId) {
-                        setCustomers(customers.map(c => c.id === editingId ? { ...c, ...formData, image: selectedImage } : c));
+                        setCustomers(customers.map(c => c.id === editingId ? { ...c, ...formData, image: finalImage } : c));
                     } else {
-                        const newCustomer = { id: Date.now(), ...formData, date: new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: '2-digit' }), image: selectedImage };
+                        const newCustomer = { id: finalId, ...formData, date: dateStr, image: finalImage };
                         setCustomers([newCustomer, ...customers]);
                     }
                     
@@ -802,34 +855,39 @@
                             </span>
                         </div>
 
-                        {filteredCustomers.map((customer, index) => (
-                            <div key={customer.id} onClick={() => handleEdit(customer)} className="group bg-white rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(30,58,138,0.08)] border border-gray-100 flex gap-4 items-center relative overflow-hidden transition-all duration-300 hover:shadow-xl hover:-translate-y-1 cursor-pointer active:scale-[0.98] animate-fade-in-up opacity-0" style={{ animationDelay: `${(index * 100) + 300}ms` }}>
-                                <div className="absolute left-0 top-4 bottom-4 w-1.5 bg-gradient-to-b from-orange-400 to-orange-500 rounded-r-full shadow-sm group-hover:scale-y-110 transition-transform duration-300"></div>
-                                <div className="w-18 h-18 bg-blue-50/50 rounded-xl flex-shrink-0 overflow-hidden border border-blue-100/50 relative shadow-inner w-[72px] h-[72px] group-hover:shadow-md transition-shadow">
-                                    {customer.image ? <img src={customer.image} alt="Color" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" /> : <div className="w-full h-full flex flex-col items-center justify-center text-blue-200"><Icons.ImageIcon className="w-6 h-6 opacity-40 group-hover:opacity-60 transition-opacity" /></div>}
-                                </div>
-                                <div className="flex-1 min-w-0 pl-1">
-                                    <h3 className="font-bold text-[#1e3a8a] text-[15px] truncate leading-tight mb-1 group-hover:text-orange-600 transition-colors duration-300">{customer.name}</h3>
-                                    <div className="flex items-center text-[#1e3a8a]/70 text-xs mb-2 font-medium">
-                                        <Icons.Phone className="w-3.5 h-3.5 mr-1.5 text-orange-500" /> <span className="tracking-wide">{customer.phone}</span>
-                                    </div>
-                                    <div className="flex items-center justify-between mt-1 pt-1 border-t border-blue-50/50">
-                                        <span className="bg-[#1e3a8a] text-white px-2 py-0.5 rounded-md text-[9px] font-bold tracking-wider uppercase">{customer.technician || 'ทั่วไป'}</span>
-                                        <span className="text-[10px] text-blue-300 font-bold flex items-center gap-2">
-                                            {customer.date}
-                                            <button onClick={(e) => handleDelete(customer.id, e)} className="p-1.5 rounded-full text-red-300 hover:text-red-500 hover:bg-red-50 transition-colors z-20 hover:scale-110 active:scale-95"><Icons.Trash2 className="w-4 h-4" /></button>
-                                        </span>
-                                    </div>
-                                </div>
-                                <Icons.ChevronRight className="text-blue-100 w-5 h-5 group-hover:text-orange-500 group-hover:translate-x-1 transition-all duration-300" />
+                        {isLoadingData ? (
+                            <div className="text-center py-20 animate-pulse">
+                                <div className="w-10 h-10 border-4 border-blue-200 border-t-[#1e3a8a] rounded-full animate-spin mx-auto mb-4"></div>
+                                <p className="text-[#1e3a8a] text-sm font-bold opacity-70">กำลังซิงค์ข้อมูล...</p>
                             </div>
-                        ))}
-
-                        {filteredCustomers.length === 0 && (
+                        ) : filteredCustomers.length === 0 ? (
                             <div className="text-center py-20 animate-pop-in opacity-0" style={{ animationDelay: '300ms' }}>
                                 <div className="bg-white p-5 rounded-3xl inline-block shadow-sm mb-4 border border-blue-50"><Icons.Search className="w-8 h-8 text-blue-100" /></div>
                                 <p className="text-[#1e3a8a]/40 text-sm font-bold">ไม่มีข้อมูลในระบบ</p>
                             </div>
+                        ) : (
+                            filteredCustomers.map((customer, index) => (
+                                <div key={customer.id} onClick={() => handleEdit(customer)} className="group bg-white rounded-2xl p-4 shadow-[0_4px_20px_-4px_rgba(30,58,138,0.08)] border border-gray-100 flex gap-4 items-center relative overflow-hidden transition-all duration-300 hover:shadow-xl hover:-translate-y-1 cursor-pointer active:scale-[0.98] animate-fade-in-up opacity-0" style={{ animationDelay: `${(index * 100) + 300}ms` }}>
+                                    <div className="absolute left-0 top-4 bottom-4 w-1.5 bg-gradient-to-b from-orange-400 to-orange-500 rounded-r-full shadow-sm group-hover:scale-y-110 transition-transform duration-300"></div>
+                                    <div className="w-18 h-18 bg-blue-50/50 rounded-xl flex-shrink-0 overflow-hidden border border-blue-100/50 relative shadow-inner w-[72px] h-[72px] group-hover:shadow-md transition-shadow">
+                                        {customer.image ? <img src={customer.image} alt="Color" className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" /> : <div className="w-full h-full flex flex-col items-center justify-center text-blue-200"><Icons.ImageIcon className="w-6 h-6 opacity-40 group-hover:opacity-60 transition-opacity" /></div>}
+                                    </div>
+                                    <div className="flex-1 min-w-0 pl-1">
+                                        <h3 className="font-bold text-[#1e3a8a] text-[15px] truncate leading-tight mb-1 group-hover:text-orange-600 transition-colors duration-300">{customer.name}</h3>
+                                        <div className="flex items-center text-[#1e3a8a]/70 text-xs mb-2 font-medium">
+                                            <Icons.Phone className="w-3.5 h-3.5 mr-1.5 text-orange-500" /> <span className="tracking-wide">{customer.phone}</span>
+                                        </div>
+                                        <div className="flex items-center justify-between mt-1 pt-1 border-t border-blue-50/50">
+                                            <span className="bg-[#1e3a8a] text-white px-2 py-0.5 rounded-md text-[9px] font-bold tracking-wider uppercase">{customer.technician || 'ทั่วไป'}</span>
+                                            <span className="text-[10px] text-blue-300 font-bold flex items-center gap-2">
+                                                {customer.date}
+                                                <button onClick={(e) => handleDelete(customer.id, e)} className="p-1.5 rounded-full text-red-300 hover:text-red-500 hover:bg-red-50 transition-colors z-20 hover:scale-110 active:scale-95"><Icons.Trash2 className="w-4 h-4" /></button>
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <Icons.ChevronRight className="text-blue-100 w-5 h-5 group-hover:text-orange-500 group-hover:translate-x-1 transition-all duration-300" />
+                                </div>
+                            ))
                         )}
                     </div>
 
@@ -861,7 +919,7 @@
 
                     {/* Editor Modal */}
                     {isModalOpen && (
-                        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#1e3a8a]/60 backdrop-blur-sm transition-all duration-300" onClick={(e) => { if (e.target === e.currentTarget) { setIsModalOpen(false); setIsCameraActive(false); } }}>
+                        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#1e3a8a]/60 backdrop-blur-sm transition-all duration-300" onClick={(e) => { if (e.target === e.currentTarget && !isSaving) { setIsModalOpen(false); setIsCameraActive(false); } }}>
                             <div className="bg-white w-full sm:max-w-md h-[94vh] sm:h-auto sm:max-h-[90vh] rounded-t-[40px] sm:rounded-3xl flex flex-col overflow-hidden shadow-2xl relative animate-pop-in opacity-0" style={{ animationDelay: '50ms' }}>
                                 
                                 {/* Camera Overlay */}
@@ -900,7 +958,7 @@
                                             <h2 className="text-2xl font-black tracking-tight">{editingId ? 'แก้ไขข้อมูล' : 'เพิ่มข้อมูลใหม่'}</h2>
                                             <p className="text-blue-300 text-xs font-bold uppercase mt-1 tracking-widest">Customer Details & Formula</p>
                                         </div>
-                                        <button onClick={() => setIsModalOpen(false)} className="bg-blue-50 p-2.5 rounded-full hover:bg-red-50 hover:text-red-500 hover:scale-110 text-blue-400 transition-all"><Icons.X className="w-6 h-6" /></button>
+                                        <button onClick={() => !isSaving && setIsModalOpen(false)} className="bg-blue-50 p-2.5 rounded-full hover:bg-red-50 hover:text-red-500 hover:scale-110 text-blue-400 transition-all"><Icons.X className="w-6 h-6" /></button>
                                     </div>
                                 </div>
 
@@ -914,13 +972,13 @@
                                             <div className="relative rounded-2xl overflow-hidden shadow-xl border-4 border-white group">
                                                 <img src={selectedImage} alt="Preview" className="w-full h-56 object-cover" />
                                                 <div className="absolute inset-0 bg-[#1e3a8a]/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-[2px]">
-                                                    <button type="button" className="bg-white p-3 rounded-full text-red-500 shadow-xl hover:scale-110 active:scale-90 transition-transform" onClick={() => setSelectedImage(null)}><Icons.Trash2 className="w-6 h-6" /></button>
+                                                    <button type="button" disabled={isSaving} className="bg-white p-3 rounded-full text-red-500 shadow-xl hover:scale-110 active:scale-90 transition-transform" onClick={() => setSelectedImage(null)}><Icons.Trash2 className="w-6 h-6" /></button>
                                                 </div>
                                             </div>
                                         ) : (
                                             <div className="grid grid-cols-2 gap-4">
-                                                <button type="button" onClick={triggerNativeCamera} className="group flex flex-col items-center justify-center gap-3 py-8 bg-white border border-blue-100 rounded-3xl text-[#1e3a8a] shadow-sm hover:shadow-md hover:border-orange-200 active:scale-95 transition-all"><div className="p-3 bg-blue-50 rounded-2xl group-hover:bg-orange-50 group-hover:scale-110 transition-all"><Icons.Camera className="w-8 h-8 text-[#1e3a8a] group-hover:text-orange-500" /></div><span className="text-xs font-black text-[#1e3a8a] uppercase tracking-widest">ถ่ายรูป</span></button>
-                                                <button type="button" onClick={triggerGallery} className="group flex flex-col items-center justify-center gap-3 py-8 bg-white border border-blue-100 rounded-3xl text-[#1e3a8a] shadow-sm hover:shadow-md hover:border-orange-200 active:scale-95 transition-all"><div className="p-3 bg-blue-50 rounded-2xl group-hover:bg-orange-50 group-hover:scale-110 transition-all"><Icons.ImageIcon className="w-8 h-8 text-[#1e3a8a] group-hover:text-orange-500" /></div><span className="text-xs font-black text-[#1e3a8a] uppercase tracking-widest">อัลบั้ม</span></button>
+                                                <button type="button" disabled={isSaving} onClick={triggerNativeCamera} className="group flex flex-col items-center justify-center gap-3 py-8 bg-white border border-blue-100 rounded-3xl text-[#1e3a8a] shadow-sm hover:shadow-md hover:border-orange-200 active:scale-95 transition-all"><div className="p-3 bg-blue-50 rounded-2xl group-hover:bg-orange-50 group-hover:scale-110 transition-all"><Icons.Camera className="w-8 h-8 text-[#1e3a8a] group-hover:text-orange-500" /></div><span className="text-xs font-black text-[#1e3a8a] uppercase tracking-widest">ถ่ายรูป</span></button>
+                                                <button type="button" disabled={isSaving} onClick={triggerGallery} className="group flex flex-col items-center justify-center gap-3 py-8 bg-white border border-blue-100 rounded-3xl text-[#1e3a8a] shadow-sm hover:shadow-md hover:border-orange-200 active:scale-95 transition-all"><div className="p-3 bg-blue-50 rounded-2xl group-hover:bg-orange-50 group-hover:scale-110 transition-all"><Icons.ImageIcon className="w-8 h-8 text-[#1e3a8a] group-hover:text-orange-500" /></div><span className="text-xs font-black text-[#1e3a8a] uppercase tracking-widest">อัลบั้ม</span></button>
                                             </div>
                                         )}
                                         <input type="file" ref={galleryInputRef} accept="image/*" onChange={handleImageUpload} className="hidden" />
@@ -932,26 +990,26 @@
                                             <Icons.User className="text-[#1e3a8a] w-6 h-6 mr-4 opacity-70" />
                                             <div className="flex-1">
                                                 <label className="block text-xs font-black uppercase mb-1 tracking-widest text-[#1e3a8a] opacity-60">ชื่อลูกค้า</label>
-                                                <input required type="text" className="w-full outline-none text-[#1e3a8a] placeholder-blue-200 text-lg font-bold bg-transparent" placeholder="คุณสมชาย..." value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                                                <input required type="text" disabled={isSaving} className="w-full outline-none text-[#1e3a8a] placeholder-blue-200 text-lg font-bold bg-transparent" placeholder="คุณสมชาย..." value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
                                             </div>
                                         </div>
                                         <div className="flex items-center border-2 border-blue-50 bg-blue-50/20 rounded-2xl px-5 py-4 focus-within:ring-2 focus-within:ring-[#1e3a8a] focus-within:bg-white transition-all shadow-sm">
                                             <Icons.Phone className="text-orange-500 w-6 h-6 mr-4 opacity-70" />
                                             <div className="flex-1">
                                                 <label className="block text-xs font-black uppercase mb-1 tracking-widest text-orange-500 opacity-60">เบอร์โทร</label>
-                                                <input required type="tel" className="w-full outline-none text-[#1e3a8a] placeholder-blue-200 text-lg font-bold bg-transparent" placeholder="08X-XXX-XXXX" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
+                                                <input required type="tel" disabled={isSaving} className="w-full outline-none text-[#1e3a8a] placeholder-blue-200 text-lg font-bold bg-transparent" placeholder="08X-XXX-XXXX" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} />
                                             </div>
                                         </div>
                                         <div className="flex items-center border-2 border-blue-50 bg-blue-50/20 rounded-2xl px-5 py-4 focus-within:ring-2 focus-within:ring-[#1e3a8a] focus-within:bg-white transition-all shadow-sm">
                                             <Icons.Brush className="text-[#1e3a8a] w-6 h-6 mr-4 opacity-70" />
                                             <div className="flex-1">
                                                 <label className="block text-xs font-black uppercase mb-1 tracking-widest text-[#1e3a8a] opacity-60">ช่างผู้รับเหมา</label>
-                                                <input type="text" className="w-full outline-none text-[#1e3a8a] placeholder-blue-200 text-lg font-bold bg-transparent" placeholder="ชื่อช่างสี (ถ้ามี)" value={formData.technician} onChange={e => setFormData({...formData, technician: e.target.value})} />
+                                                <input type="text" disabled={isSaving} className="w-full outline-none text-[#1e3a8a] placeholder-blue-200 text-lg font-bold bg-transparent" placeholder="ชื่อช่างสี (ถ้ามี)" value={formData.technician} onChange={e => setFormData({...formData, technician: e.target.value})} />
                                             </div>
                                         </div>
                                         <div className="border-2 border-blue-50 bg-blue-50/20 rounded-2xl px-5 py-4 focus-within:ring-2 focus-within:ring-[#1e3a8a] focus-within:bg-white transition-all shadow-sm">
                                             <label className="block text-xs font-black text-[#1e3a8a] uppercase mb-2 tracking-widest opacity-60">รายละเอียดเพิ่มเติม / สูตรสี</label>
-                                            <textarea rows="4" className="w-full outline-none text-[#1e3a8a] placeholder-blue-200 text-base font-bold bg-transparent resize-none leading-relaxed" placeholder="ยี่ห้อรถ, รหัสสี..." value={formData.note} onChange={e => setFormData({...formData, note: e.target.value})} />
+                                            <textarea rows="4" disabled={isSaving} className="w-full outline-none text-[#1e3a8a] placeholder-blue-200 text-base font-bold bg-transparent resize-none leading-relaxed" placeholder="ยี่ห้อรถ, รหัสสี..." value={formData.note} onChange={e => setFormData({...formData, note: e.target.value})} />
                                         </div>
                                     </div>
                                 </form>
