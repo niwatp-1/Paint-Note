@@ -155,6 +155,9 @@
             const [editingId, setEditingId] = useState(null); 
             const [selectedImage, setSelectedImage] = useState(null);
             
+            // --- Line Browser Detection ---
+            const [isLineBrowser, setIsLineBrowser] = useState(false);
+            
             // --- Camera State Management (Refined) ---
             const [isCameraActive, setIsCameraActive] = useState(false);
             const [facingMode, setFacingMode] = useState('environment'); // environment = rear, user = front
@@ -173,6 +176,13 @@
 
             const galleryInputRef = useRef(null);
             const nativeCameraInputRef = useRef(null);
+
+            useEffect(() => {
+                // Detect LINE in-app browser
+                if (/Line/i.test(navigator.userAgent)) {
+                    setIsLineBrowser(true);
+                }
+            }, []);
 
             useEffect(() => {
                 localStorage.setItem('paintShopData', JSON.stringify(customers));
@@ -326,6 +336,12 @@
                      setCameraError(null);
                 }
             };
+            
+            const handleOpenExternal = () => {
+                const currentUrl = window.location.href;
+                const separator = currentUrl.includes('?') ? '&' : '?';
+                window.location.href = currentUrl + separator + 'openExternalBrowser=1';
+            };
 
             const handleAddNew = () => {
                 setFormData({ name: '', phone: '', technician: '', note: '' });
@@ -385,8 +401,24 @@
             };
 
             return (
-                <div className="min-h-screen bg-gray-50 text-[#1e3a8a] pb-24 relative overflow-hidden font-sans">
+                <div className="min-h-screen bg-gray-50 text-[#1e3a8a] pb-24 relative overflow-hidden font-sans flex flex-col">
                     
+                    {/* LINE Browser Warning Banner */}
+                    {isLineBrowser && (
+                        <div className="relative z-50 bg-orange-500 text-white px-4 py-3 flex justify-between items-center shadow-md animate-slide-down">
+                            <div className="flex items-center gap-2 flex-1">
+                                <Icons.Camera className="w-5 h-5 flex-shrink-0" />
+                                <span className="text-xs font-bold leading-tight">เพื่อใช้งานกล้อง แนะนำให้เปิดในเบราว์เซอร์ปกติ</span>
+                            </div>
+                            <button 
+                                onClick={handleOpenExternal}
+                                className="ml-3 bg-white text-orange-600 px-3 py-1.5 rounded-full text-[10px] font-bold active:scale-95 transition-transform whitespace-nowrap shadow-sm"
+                            >
+                                เปิด Chrome/Safari
+                            </button>
+                        </div>
+                    )}
+
                     {/* Background Decor */}
                     <div className="absolute top-0 left-0 w-full h-72 bg-gradient-to-b from-[#1e3a8a] via-[#2546a3] to-transparent z-0 shadow-xl opacity-90 transition-all duration-1000"></div>
 
@@ -669,7 +701,7 @@
                                         {/* Hidden Gallery Input */}
                                         <input type="file" ref={galleryInputRef} accept="image/*" onChange={handleImageUpload} className="hidden" />
                                         {/* Hidden Native Camera Input with strict accept attribute */}
-                                        <input type="file" ref={nativeCameraInputRef} accept="image/jpeg, image/png, image/jpg" capture="environment" onChange={handleImageUpload} className="hidden" />
+                                        <input type="file" ref={nativeCameraInputRef} accept="image/*" capture="environment" onChange={handleImageUpload} className="hidden" />
                                     </div>
 
                                     {/* Form Fields */}
