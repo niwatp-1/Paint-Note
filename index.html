@@ -94,6 +94,10 @@
     <script type="text/babel">
         const { useState, useRef, useEffect, useCallback } = React;
 
+        // --- Global Settings ---
+        // ⚠️ นำ Web App URL ของคุณมาใส่ตรงนี้ ⚠️
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwSZNGOL-TbsTPGkEdqhQJkgyJLa-EkePz8V_ExUgjWlVhvsSjAVpmwe1Z7eRF_rJAi/exec"; 
+
         // --- Icons Components (SVG) ---
         const Icon = ({ children, className, onClick }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} onClick={onClick}>
@@ -142,8 +146,9 @@
             const [password, setPassword] = useState('');
             const [selectedPlan, setSelectedPlan] = useState('FREE');
             const [errorMsg, setErrorMsg] = useState('');
+            const [isSaving, setIsSaving] = useState(false);
 
-            const handleAuth = (e) => {
+            const handleAuth = async (e) => {
                 e.preventDefault();
                 setErrorMsg('');
                 
@@ -152,25 +157,57 @@
                     return;
                 }
 
-                let usersDB = JSON.parse(localStorage.getItem('paintShopUsersDB')) || [];
+                if (WEB_APP_URL === "YOUR_WEB_APP_URL_HERE") {
+                    setErrorMsg('กรุณาตั้งค่า WEB_APP_URL เพื่อเชื่อมต่อฐานข้อมูลก่อนใช้งาน');
+                    return;
+                }
 
-                if (isLogin) {
-                    const user = usersDB.find(u => u.username === username && u.password === password);
-                    if (user) {
-                        onLogin(user);
-                    } else {
-                        setErrorMsg('ชื่อผู้ใช้ หรือ รหัสผ่าน ไม่ถูกต้อง');
+                setIsSaving(true);
+                try {
+                    // ดึงข้อมูลผู้ใช้ทั้งหมดจาก Google Sheets
+                    const res = await fetch(WEB_APP_URL, {
+                        method: 'POST',
+                        body: JSON.stringify({ action: 'readUsers' }),
+                        headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                    });
+                    const result = await res.json();
+                    let usersDB = result.data || [];
+
+                    // ถ้าระบบยังไม่มีใครเลย ให้สร้างแอดมินจำลองขึ้นมา 1 คน
+                    if (usersDB.length === 0) {
+                        usersDB = [{ id: 'admin1', username: 'admin', password: 'password', role: 'ADMIN', plan: 'PREMIUM' }];
                     }
-                } else {
-                    const exists = usersDB.find(u => u.username === username);
-                    if (exists) {
-                        setErrorMsg('ชื่อผู้ใช้นี้มีในระบบแล้ว');
+
+                    if (isLogin) {
+                        const user = usersDB.find(u => u.username === username && u.password === password);
+                        if (user) {
+                            onLogin(user);
+                        } else {
+                            setErrorMsg('ชื่อผู้ใช้ หรือ รหัสผ่าน ไม่ถูกต้อง');
+                        }
                     } else {
-                        const newUser = { id: Date.now(), username, password, plan: selectedPlan, role: 'USER' };
-                        usersDB.push(newUser);
-                        localStorage.setItem('paintShopUsersDB', JSON.stringify(usersDB));
-                        onLogin(newUser);
+                        const exists = usersDB.find(u => u.username === username);
+                        if (exists) {
+                            setErrorMsg('ชื่อผู้ใช้นี้มีในระบบแล้ว');
+                        } else {
+                            const newUser = { id: Date.now(), username, password, plan: selectedPlan, role: 'USER' };
+                            
+                            // ส่งข้อมูล Registration ไปเซฟลง Google Sheets โดยตรง
+                            const saveRes = await fetch(WEB_APP_URL, {
+                                method: 'POST',
+                                body: JSON.stringify({ action: 'saveUser', ...newUser }),
+                                headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                            });
+                            const saveResult = await saveRes.json();
+                            if(saveResult.status !== 'success') throw new Error(saveResult.message);
+
+                            onLogin(newUser);
+                        }
                     }
+                } catch (err) {
+                    setErrorMsg('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์ได้: ' + err.message);
+                } finally {
+                    setIsSaving(false);
                 }
             };
 
@@ -202,7 +239,7 @@
                                     <input 
                                         type="text" placeholder="ชื่อผู้ใช้งาน (Username)" 
                                         className="w-full bg-transparent outline-none text-[#1e3a8a] font-semibold text-sm"
-                                        value={username} onChange={e => setUsername(e.target.value)}
+                                        value={username} onChange={e => setUsername(e.target.value)} disabled={isSaving}
                                     />
                                 </div>
                             </div>
@@ -212,7 +249,7 @@
                                     <input 
                                         type="password" placeholder="รหัสผ่าน (Password)" 
                                         className="w-full bg-transparent outline-none text-[#1e3a8a] font-semibold text-sm"
-                                        value={password} onChange={e => setPassword(e.target.value)}
+                                        value={password} onChange={e => setPassword(e.target.value)} disabled={isSaving}
                                     />
                                 </div>
                             </div>
@@ -224,7 +261,7 @@
                                         {Object.values(PACKAGES).map(pkg => (
                                             <div 
                                                 key={pkg.id} 
-                                                onClick={() => setSelectedPlan(pkg.id)}
+                                                onClick={() => !isSaving && setSelectedPlan(pkg.id)}
                                                 className={`cursor-pointer rounded-xl p-3 border-2 text-center transition-all ${selectedPlan === pkg.id ? pkg.color + ' scale-105 shadow-md' : 'bg-white border-gray-100 opacity-60 hover:opacity-100'}`}
                                             >
                                                 <div className="flex justify-center mb-1">{pkg.icon}</div>
@@ -236,8 +273,9 @@
                                 </div>
                             )}
 
-                            <button type="submit" className="w-full bg-[#1e3a8a] text-white font-bold py-4 rounded-2xl shadow-lg hover:bg-[#172554] hover:shadow-xl active:scale-95 transition-all mt-6">
-                                {isLogin ? 'เข้าสู่ระบบ' : 'สมัครสมาชิก'}
+                            <button type="submit" disabled={isSaving} className={`w-full bg-[#1e3a8a] text-white font-bold py-4 rounded-2xl shadow-lg hover:bg-[#172554] hover:shadow-xl transition-all mt-6 flex justify-center items-center gap-2 ${isSaving ? 'opacity-80' : 'active:scale-95'}`}>
+                                {isSaving ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : null}
+                                {isSaving ? 'กำลังดำเนินการ...' : (isLogin ? 'เข้าสู่ระบบ' : 'สมัครสมาชิก')}
                             </button>
                         </form>
 
@@ -245,7 +283,7 @@
                             <p className="text-xs text-blue-300 font-semibold">
                                 {isLogin ? "ยังไม่มีบัญชีใช่หรือไม่? " : "มีบัญชีอยู่แล้ว? "}
                                 <span 
-                                    onClick={() => { setIsLogin(!isLogin); setErrorMsg(''); }}
+                                    onClick={() => { if(!isSaving){ setIsLogin(!isLogin); setErrorMsg(''); } }}
                                     className="text-orange-500 font-bold cursor-pointer hover:underline"
                                 >
                                     {isLogin ? "สมัครสมาชิกที่นี่" : "เข้าสู่ระบบเลย"}
@@ -259,20 +297,39 @@
 
         // --- Admin Dashboard Application ---
         const AdminDashboard = ({ currentUser, onLogout }) => {
-            const [allUsers, setAllUsers] = useState(() => {
-                return JSON.parse(localStorage.getItem('paintShopUsersDB')) || [];
-            });
+            const [allUsers, setAllUsers] = useState([]);
             const [activeTab, setActiveTab] = useState('overview'); // 'overview' | 'users'
             const [searchTerm, setSearchTerm] = useState('');
+            const [isSaving, setIsSaving] = useState(false);
+            const [isLoading, setIsLoading] = useState(true);
             
             // Manage User Modal
             const [isUserModalOpen, setIsUserModalOpen] = useState(false);
             const [editingUserId, setEditingUserId] = useState(null);
             const [userForm, setUserForm] = useState({ username: '', password: '', role: 'USER', plan: 'FREE' });
 
+            // ดึงรายชื่อ User จาก API ทันทีที่เปิด Admin Dashboard (ยกเลิก localStorage)
             useEffect(() => {
-                localStorage.setItem('paintShopUsersDB', JSON.stringify(allUsers));
-            }, [allUsers]);
+                const fetchUsers = async () => {
+                    if (WEB_APP_URL && WEB_APP_URL !== "YOUR_WEB_APP_URL_HERE") {
+                        try {
+                            const res = await fetch(WEB_APP_URL, {
+                                method: 'POST',
+                                body: JSON.stringify({ action: 'readUsers' }),
+                                headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                            });
+                            const result = await res.json();
+                            if (result.status === 'success') {
+                                setAllUsers(result.data || []);
+                            }
+                        } catch(e) {
+                            console.error("ไม่สามารถโหลดรายชื่อผู้ใช้ได้", e);
+                        }
+                    }
+                    setIsLoading(false);
+                };
+                fetchUsers();
+            }, []);
 
             // Calc Stats
             const totalUsers = allUsers.length;
@@ -293,28 +350,65 @@
                 setIsUserModalOpen(true);
             };
 
-            const handleDeleteUser = (idOrUsername, e) => {
+            const handleDeleteUser = async (idOrUsername, e) => {
                 e.stopPropagation();
                 if (window.confirm('ต้องการลบบัญชีผู้ใช้นี้ใช่หรือไม่ ข้อมูลของเขาจะหายไปทั้งหมด?')) {
+                    const prevUsers = [...allUsers];
                     setAllUsers(allUsers.filter(u => (u.id || u.username) !== idOrUsername));
+                    
+                    // ลบใน Backend
+                    if (WEB_APP_URL && WEB_APP_URL !== "YOUR_WEB_APP_URL_HERE") {
+                        try {
+                            await fetch(WEB_APP_URL, {
+                                method: 'POST',
+                                body: JSON.stringify({ action: 'deleteUser', id: idOrUsername }),
+                                headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                            });
+                        } catch (err) {
+                            alert("ลบข้อมูลในเซิร์ฟเวอร์ไม่สำเร็จ");
+                            setAllUsers(prevUsers);
+                        }
+                    }
                 }
             };
 
-            const handleSaveUser = (e) => {
+            const handleSaveUser = async (e) => {
                 e.preventDefault();
                 if (!userForm.username || !userForm.password) return;
 
-                if (editingUserId) {
-                    setAllUsers(allUsers.map(u => (u.id || u.username) === editingUserId ? { ...u, ...userForm } : u));
-                } else {
-                    if (allUsers.find(u => u.username === userForm.username)) {
-                        alert("ชื่อผู้ใช้นี้มีในระบบแล้ว");
-                        return;
+                setIsSaving(true);
+                try {
+                    let finalId = editingUserId || Date.now();
+                    const payload = { action: 'saveUser', id: finalId, ...userForm };
+
+                    // บันทึกไป Backend
+                    if (WEB_APP_URL && WEB_APP_URL !== "YOUR_WEB_APP_URL_HERE") {
+                        const res = await fetch(WEB_APP_URL, {
+                            method: 'POST',
+                            body: JSON.stringify(payload),
+                            headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                        });
+                        const data = await res.json();
+                        if (data.status !== 'success') throw new Error(data.message);
                     }
-                    const newUser = { id: Date.now(), ...userForm };
-                    setAllUsers([newUser, ...allUsers]);
+
+                    if (editingUserId) {
+                        setAllUsers(allUsers.map(u => (u.id || u.username) === editingUserId ? { ...u, ...userForm } : u));
+                    } else {
+                        if (allUsers.find(u => u.username === userForm.username)) {
+                            alert("ชื่อผู้ใช้นี้มีในระบบแล้ว");
+                            setIsSaving(false);
+                            return;
+                        }
+                        const newUser = { id: finalId, ...userForm };
+                        setAllUsers([newUser, ...allUsers]);
+                    }
+                    setIsUserModalOpen(false);
+                } catch(err) {
+                    alert("บันทึกไม่สำเร็จ: " + err.message);
+                } finally {
+                    setIsSaving(false);
                 }
-                setIsUserModalOpen(false);
             };
 
             return (
@@ -445,7 +539,7 @@
 
                     {/* Admin Edit User Modal */}
                     {isUserModalOpen && (
-                        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#0f172a]/80 backdrop-blur-sm transition-all duration-300" onClick={(e) => { if (e.target === e.currentTarget) setIsUserModalOpen(false); }}>
+                        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-[#0f172a]/80 backdrop-blur-sm transition-all duration-300" onClick={(e) => { if (e.target === e.currentTarget && !isSaving) setIsUserModalOpen(false); }}>
                             <div className="bg-white w-full sm:max-w-md h-[90vh] sm:h-auto sm:max-h-[90vh] rounded-t-[40px] sm:rounded-3xl flex flex-col overflow-hidden shadow-2xl relative animate-pop-in">
                                 
                                 <div className="bg-white text-[#1e3a8a] p-8 pb-4 rounded-b-3xl z-10 relative shadow-sm">
@@ -454,7 +548,7 @@
                                             <h2 className="text-2xl font-black tracking-tight">{editingUserId ? 'แก้ไขผู้ใช้' : 'เพิ่มผู้ใช้ใหม่'}</h2>
                                             <p className="text-blue-300 text-xs font-bold uppercase mt-1 tracking-widest">User Management</p>
                                         </div>
-                                        <button onClick={() => setIsUserModalOpen(false)} className="bg-gray-100 p-2.5 rounded-full hover:bg-red-50 hover:text-red-500 hover:scale-110 transition-all"><Icons.X className="w-6 h-6" /></button>
+                                        <button disabled={isSaving} onClick={() => setIsUserModalOpen(false)} className="bg-gray-100 p-2.5 rounded-full hover:bg-red-50 hover:text-red-500 hover:scale-110 transition-all"><Icons.X className="w-6 h-6" /></button>
                                     </div>
                                 </div>
 
@@ -464,22 +558,22 @@
                                             <Icons.User className="text-gray-400 w-5 h-5 mr-4" />
                                             <div className="flex-1">
                                                 <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1">Username</label>
-                                                <input required type="text" className="w-full outline-none text-[#1e3a8a] font-bold bg-transparent" value={userForm.username} onChange={e => setUserForm({...userForm, username: e.target.value})} disabled={!!editingUserId} />
+                                                <input required type="text" className="w-full outline-none text-[#1e3a8a] font-bold bg-transparent" value={userForm.username} onChange={e => setUserForm({...userForm, username: e.target.value})} disabled={!!editingUserId || isSaving} />
                                             </div>
                                         </div>
                                         <div className="flex items-center border-2 border-gray-100 bg-gray-50 rounded-2xl px-5 py-4 focus-within:border-[#0f172a] focus-within:bg-white transition-all">
                                             <Icons.Lock className="text-gray-400 w-5 h-5 mr-4" />
                                             <div className="flex-1">
                                                 <label className="block text-[10px] font-black uppercase tracking-widest text-gray-400 mb-1">Password</label>
-                                                <input required type="text" className="w-full outline-none text-[#1e3a8a] font-bold bg-transparent" value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})} />
+                                                <input required type="text" className="w-full outline-none text-[#1e3a8a] font-bold bg-transparent" value={userForm.password} onChange={e => setUserForm({...userForm, password: e.target.value})} disabled={isSaving} />
                                             </div>
                                         </div>
                                         
                                         <div className="pt-2">
                                             <label className="block text-xs font-black uppercase tracking-widest text-[#1e3a8a] mb-3">บทบาท (Role)</label>
                                             <div className="flex gap-2">
-                                                <button type="button" onClick={() => setUserForm({...userForm, role: 'USER'})} className={`flex-1 py-3 rounded-xl text-xs font-bold border-2 transition-all ${userForm.role === 'USER' ? 'border-[#1e3a8a] bg-blue-50 text-[#1e3a8a]' : 'border-gray-100 text-gray-400'}`}>USER</button>
-                                                <button type="button" onClick={() => setUserForm({...userForm, role: 'ADMIN'})} className={`flex-1 py-3 rounded-xl text-xs font-bold border-2 transition-all ${userForm.role === 'ADMIN' ? 'border-rose-500 bg-rose-50 text-rose-600' : 'border-gray-100 text-gray-400'}`}>ADMIN</button>
+                                                <button type="button" disabled={isSaving} onClick={() => setUserForm({...userForm, role: 'USER'})} className={`flex-1 py-3 rounded-xl text-xs font-bold border-2 transition-all ${userForm.role === 'USER' ? 'border-[#1e3a8a] bg-blue-50 text-[#1e3a8a]' : 'border-gray-100 text-gray-400'}`}>USER</button>
+                                                <button type="button" disabled={isSaving} onClick={() => setUserForm({...userForm, role: 'ADMIN'})} className={`flex-1 py-3 rounded-xl text-xs font-bold border-2 transition-all ${userForm.role === 'ADMIN' ? 'border-rose-500 bg-rose-50 text-rose-600' : 'border-gray-100 text-gray-400'}`}>ADMIN</button>
                                             </div>
                                         </div>
 
@@ -488,7 +582,7 @@
                                                 <label className="block text-xs font-black uppercase tracking-widest text-[#1e3a8a] mb-3">แพ็กเกจ (Plan)</label>
                                                 <div className="grid grid-cols-3 gap-2">
                                                     {Object.values(PACKAGES).map(pkg => (
-                                                        <div key={pkg.id} onClick={() => setUserForm({...userForm, plan: pkg.id})} className={`cursor-pointer rounded-xl p-3 border-2 text-center transition-all ${userForm.plan === pkg.id ? pkg.color + ' shadow-md' : 'border-gray-100 opacity-60'}`}>
+                                                        <div key={pkg.id} onClick={() => !isSaving && setUserForm({...userForm, plan: pkg.id})} className={`cursor-pointer rounded-xl p-3 border-2 text-center transition-all ${userForm.plan === pkg.id ? pkg.color + ' shadow-md' : 'border-gray-100 opacity-60'}`}>
                                                             <div className="flex justify-center mb-1">{pkg.icon}</div>
                                                             <p className="text-[10px] font-bold">{pkg.name}</p>
                                                         </div>
@@ -500,8 +594,9 @@
                                 </form>
 
                                 <div className="p-6 bg-white border-t border-gray-100">
-                                    <button onClick={handleSaveUser} className="w-full bg-[#0f172a] active:translate-y-[2px] text-white font-black py-4 rounded-2xl shadow-xl transition-all flex items-center justify-center gap-3 text-sm tracking-[0.2em] uppercase">
-                                        <Icons.Save className="w-5 h-5" /> <span>{editingUserId ? 'บันทึกการแก้ไข' : 'สร้างบัญชีผู้ใช้'}</span>
+                                    <button disabled={isSaving} onClick={handleSaveUser} className={`w-full bg-[#0f172a] text-white font-black py-4 rounded-2xl shadow-xl transition-all flex items-center justify-center gap-3 text-sm tracking-[0.2em] uppercase ${isSaving ? 'opacity-80' : 'active:translate-y-[2px]'}`}>
+                                        {isSaving ? <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin"></div> : <Icons.Save className="w-5 h-5" />} 
+                                        <span>{isSaving ? 'กำลังบันทึก...' : (editingUserId ? 'บันทึกการแก้ไข' : 'สร้างบัญชีผู้ใช้')}</span>
                                     </button>
                                 </div>
                             </div>
@@ -513,21 +608,11 @@
 
         // --- Main User Dashboard Application ---
         const Dashboard = ({ currentUser, onLogout }) => {
-            const [customers, setCustomers] = useState(() => {
-                try {
-                    const saved = localStorage.getItem(`paintShopData_${currentUser.username}`);
-                    return saved ? JSON.parse(saved) : [];
-                } catch (e) {
-                    return [];
-                }
-            });
-
-            // ⚠️ กำหนด Web App URL ของ Google Apps Script ที่นี่ ⚠️
-            const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbx8a27iMvXV01p38ayj0uW56jlT3v_YWB2yyQQf9ekv9q4DC9svPWlE9sjE226ItcLS/exec"; 
-
+            const [customers, setCustomers] = useState([]);
             const [isLoadingData, setIsLoadingData] = useState(false);
             const [isSaving, setIsSaving] = useState(false);
 
+            // ดึงข้อมูลลูกค้าจาก API เท่านั้น (ยกเลิก localStorage)
             useEffect(() => {
                 const fetchData = async () => {
                     if (WEB_APP_URL && WEB_APP_URL !== "YOUR_WEB_APP_URL_HERE") {
@@ -540,7 +625,7 @@
                             });
                             const result = await response.json();
                             if (result.status === 'success') {
-                                setCustomers(result.data);
+                                setCustomers(result.data || []);
                             }
                         } catch (err) {
                             console.error("Fetch error:", err);
@@ -551,11 +636,6 @@
                 };
                 fetchData();
             }, [currentUser.username]);
-
-            useEffect(() => {
-                // อัปเดตข้อมูลใน LocalStorage ด้วยเพื่อความเร็วในการโหลดครั้งถัดไป
-                localStorage.setItem(`paintShopData_${currentUser.username}`, JSON.stringify(customers));
-            }, [customers, currentUser.username]);
 
             const currentPackage = PACKAGES[currentUser.plan] || PACKAGES.FREE;
             const usageCount = customers.length;
@@ -745,7 +825,7 @@
                     let finalId = editingId || Date.now();
 
                     // ส่ง API ไปยัง Google Apps Script (ถ้ามีการตั้งค่า URL)
-                    if (WEB_APP_URL && WEB_APP_URL !== "https://script.google.com/macros/s/AKfycbw_Jxv4EM1JXrwXule-aVcCSv35jgFgxqPI8woZv-BoVXcmU8jnLUf8Bkd1DZbBFAgv/exec") {
+                    if (WEB_APP_URL && WEB_APP_URL !== "YOUR_WEB_APP_URL_HERE") {
                         const response = await fetch(WEB_APP_URL, {
                             method: 'POST',
                             body: JSON.stringify(payload),
@@ -1042,15 +1122,6 @@
                 const saved = localStorage.getItem('paintShopCurrentUser');
                 return saved ? JSON.parse(saved) : null;
             });
-
-            // สร้างบัญชี Admin เริ่มต้นถ้าระบบยังไม่มี User
-            useEffect(() => {
-                let db = JSON.parse(localStorage.getItem('paintShopUsersDB'));
-                if (!db || db.length === 0) {
-                    db = [{ id: 'admin1', username: 'admin', password: 'password', role: 'ADMIN', plan: 'PREMIUM' }];
-                    localStorage.setItem('paintShopUsersDB', JSON.stringify(db));
-                }
-            }, []);
 
             const handleLogin = (user) => {
                 setCurrentUser(user);
